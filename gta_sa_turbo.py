@@ -70,14 +70,19 @@ sys.excepthook = excepthook_global
 turbo_activo = False
 _ejecutando = True
 _estado = ""
+_lock_estado = threading.Lock()
+_layout_inicializado = False
 
 
 def mostrar_estado(texto):
     global _estado
-    if texto != _estado:
-        _estado = texto
-        sys.stdout.write("\033[F\033[K" + texto + "\n")
-        sys.stdout.flush()
+    with _lock_estado:
+        if not _layout_inicializado:
+            return
+        if texto != _estado:
+            _estado = texto
+            sys.stdout.write("\033[F\033[K" + texto + "\n")
+            sys.stdout.flush()
 
 
 def activar_turbo():
@@ -112,7 +117,7 @@ def bucle_principal():
 
 
 def main():
-    global _ejecutando
+    global _ejecutando, _layout_inicializado
 
     os.system("cls")
 
@@ -128,11 +133,14 @@ def main():
     hilo = threading.Thread(target=bucle_principal, daemon=True)
     hilo.start()
 
-    print("Macro GTA SA lista.")
     print(f"  {HOTKEY_TURBO_ON} -> activar modo turbo")
     print(f"  {HOTKEY_TURBO_OFF} -> desactivar modo turbo")
     print(f"  Manten {TECLA_ACCION.upper()} para ejecutar la macro")
     print(f"  {HOTKEY_SALIR.upper()} -> salir")
+    print()
+    print()
+    with _lock_estado:
+        _layout_inicializado = True
     mostrar_estado("Modo turbo: desactivado")
 
     try:
