@@ -1,11 +1,11 @@
 @echo off
 REM Ejecuta la macro de GTA SA.
-REM Ejecutar como administrador (el hook global de teclado lo requiere).
+REM Solo hace falta ejecutarlo como administrador si GTA SA corre elevado.
 
 cd /d "%~dp0"
 
 REM Comprueba si las dependencias ya estan instaladas.
-python -c "import keyboard, pydirectinput" 2>nul
+python -c "import keyboard" 2>nul
 if errorlevel 1 (
     echo Instalando dependencias...
     python -m pip install -r requirements.txt
