@@ -20,4 +20,18 @@ if errorlevel 1 (
 
 echo Iniciando macro...
 python gta_sa_turbo.py
+set CODIGO=%errorlevel%
+
+REM El codigo de salida distingue una salida limpia (0) de un fallo (1).
+REM Antes se perdia, y cualquier fallo se veia igual que un cierre normal.
+if %CODIGO%==0 (
+    echo.
+    echo Macro finalizada.
+) else (
+    echo.
+    echo [!] La macro termino con un error ^(codigo %CODIGO%^).
+    echo [!] El detalle esta en error.log, en la carpeta del script.
+)
+
 pause
+exit /b %CODIGO%

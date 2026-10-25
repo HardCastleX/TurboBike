@@ -42,6 +42,17 @@ Normalmente **no**: ni el hook global de teclado, ni `SendInput`, ni leer la mem
 | `W` (mantener) | Ejecuta la macro mientras aceleras en una moto |
 | `FIN (END)` | Cerrar el script |
 
+## Diagnóstico de fallos
+
+Si el script termina solo, el motivo queda siempre escrito en `error.log` y en
+la consola, y `ejecutar.bat` distingue entre salida limpia y error.
+
+El script vigila los dos hilos que `keyboard` usa en segundo plano (el de
+escucha del hook de Windows y el que invoca los callbacks de los hotkeys).
+Si cualquiera de los dos muere, todos los hotkeys dejan de funcionar —incluido
+`FIN`—, así que el script no se quedaría esperando: lo detecta en un par de
+segundos y termina con un mensaje explicando qué pasó.
+
 ## Archivos
 
 - `gta_sa_turbo.py` — script principal

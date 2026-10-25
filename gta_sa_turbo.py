@@ -61,6 +61,9 @@ INTERVALO_CHEQUEO_PROCESO = 0.5  # cada cuanto se comprueba que el juego sigue v
 
 ERROR_LOG = "error.log"
 
+# Cada cuanto el watchdog comprueba que la libreria `keyboard` sigue viva
+INTERVALO_WATCHDOG = 2.0
+
 ANCHO = 52  # ancho interior del recuadro, en caracteres
 
 # Paleta ANSI del layout
@@ -78,6 +81,7 @@ C_AVISO = "\033[38;5;203m"
 # Estados del indicador: (color, simbolo, texto)
 ESTADO_SIN_JUEGO = (C_AVISO, "!", "Esperando gta_sa.exe")
 ESTADO_FALLO = (C_AVISO, "x", "Fallo interno: revisa error.log")
+ESTADO_SIN_TECLADO = (C_AVISO, "x", "El hook de teclado ha muerto: revisa error.log")
 ESTADO_OFF = (C_OFF, "o", "Turbo desactivado")
 ESTADO_ESPERA = (C_ESPERA, "*", "Turbo activado  ~  en espera de W")
 ESTADO_ACELERANDO = (C_ON, "#", "Turbo activado  ~  ACELERANDO")
@@ -339,6 +343,24 @@ _extra = ""
 _lock_estado = threading.Lock()
 _layout_inicializado = False
 
+# Motivo real de la salida. Se rellena siempre antes de terminar, para que
+# error.log distinga una salida limpia de un fallo.
+_motivo_salida = None
+_lock_salida = threading.Lock()
+
+
+def marcar_salida(motivo):
+    """Guarda el motivo de la salida (solo el primero gana)."""
+    global _motivo_salida
+    with _lock_salida:
+        if _motivo_salida is None:
+            _motivo_salida = motivo
+
+
+def motivo_salida():
+    with _lock_salida:
+        return _motivo_salida
+
 
 # --------------------------------------------------------------------------
 # Layout de consola
@@ -414,6 +436,90 @@ def activar_turbo():
 def desactivar_turbo():
     global turbo_activo
     turbo_activo = False
+
+
+# --------------------------------------------------------------------------
+# Integridad de la libreria `keyboard`
+#
+# La libreria `keyboard` corre su hook en dos hilos daemon:
+#   - el hilo de escucha, que bombea los mensajes de Windows (GetMessage)
+#   - el hilo de proceso, que consume la cola de eventos e invoca los
+#     callbacks de los hotkeys
+#
+# Ninguno de los dos esta vigilado por la libreria. Si cualquiera de los
+# dos muere, todos los hotkeys (F11, F12 y FIN) dejan de funcionar para
+# siempre y el proceso se queda ahi, con la consola normal, sin teclado y
+# sin salida: el bucle principal sigue bloqueado en keyboard.wait().
+#
+# Con el watchdog los detectamos y cerramos de forma controlada, dejando
+# constancia en error.log de que threads han muerto.
+# --------------------------------------------------------------------------
+
+
+def _hilos_keyboard_vivos():
+    """Devuelve una lista con los hilos de `keyboard` que NO estan vivos.
+
+    Lista vacia = todo en orden. Cada elemento es una descripcion del hilo
+    y el motivo por el que se considera muerto.
+    """
+    try:
+        listener = keyboard._listener
+    except AttributeError:
+        return []
+
+    muertos = []
+    for atributo, descripcion in (
+        ("listening_thread", "hilo de escucha del hook (GetMessage)"),
+        ("processing_thread", "hilo de proceso de eventos (callbacks)"),
+    ):
+        hilo = getattr(listener, atributo, None)
+        if hilo is None:
+            # La libreria aun no ha arrancado los hilos: no es un fallo.
+            continue
+        if not hilo.is_alive():
+            muertos.append(descripcion)
+    return muertos
+
+
+def watchdog_teclado():
+    """Vigila los hilos de `keyboard` y detiene el script si mueren.
+
+    Corre en un hilo daemon. Si el hook muere, deja la macro inservible
+    (no se puede ni activar el turbo ni salir con FIN), asi que lo mejor es
+    terminar de forma controlada y explicada.
+    """
+    global _ejecutando
+    while _ejecutando:
+        time.sleep(INTERVALO_WATCHDOG)
+        if not _ejecutando:
+            return
+        muertos = _hilos_keyboard_vivos()
+        if muertos:
+            mensaje = "El hook de teclado ha muerto: " + "; ".join(muertos)
+            registrar_evento(mensaje)
+            marcar_salida(mensaje)
+            _ejecutando = False
+            return
+
+
+def registrar_hotkey(nombre, callback):
+    """Registra un hotkey protege el hilo de callbacks de `keyboard`.
+
+    En `keyboard`, los callbacks de hotkey se invocan desde el hilo de
+    proceso SIN proteccion contra excepciones (keyboard._generic.process ->
+    pre_process_event). Si el callback lanza, ese hilo muere y con el
+    quedan todos los hotkeys, incluido FIN. Envolvemos el callback para
+    que un fallo nuestro nunca se coma el teclado.
+    """
+
+    def protegido(*args, **kwargs):
+        try:
+            return callback(*args, **kwargs)
+        except Exception:
+            registrar_excepcion(sys.exc_info(), f"callback del hotkey {nombre}")
+            return None
+
+    return keyboard.add_hotkey(nombre, protegido)
 
 
 class ContadorFps:
@@ -554,6 +660,45 @@ def comprobar_escala_tiempo(juego):
         )
 
 
+def esperar_salida():
+    """Espera a que el usuario pulse FIN o Ctrl+C.
+
+    No usamos keyboard.wait() directamente porque bloquea de forma
+    indefinida sin revisar nada: si el hook de `keyboard` muere, wait() se
+    quedaria colgado para siempre sin que nada lo detecte. En su lugar
+    esperamos con un timeout corto y comprobamos el estado en cada vuelta.
+
+    Devuelve el motivo de la salida.
+    """
+    evento_salida = threading.Event()
+
+    def _al_pulsar_fin():
+        evento_salida.set()
+
+    quitar = None
+    try:
+        quitar = registrar_hotkey(HOTKEY_SALIR, _al_pulsar_fin)
+    except Exception:
+        registrar_excepcion(sys.exc_info(), "registro del hotkey de salida")
+
+    try:
+        while _ejecutando:
+            if evento_salida.wait(0.25):
+                return "FIN"
+    except KeyboardInterrupt:
+        return "Ctrl+C"
+    finally:
+        # Quitar el hotkey puede fallar con KeyError si otro camino ya lo
+        # elimino de la tabla interna de `keyboard`. Es inocuo: lo que
+        # importa es no dejar una excepcion sin controlar escapando.
+        if quitar is not None:
+            try:
+                quitar()
+            except Exception:
+                pass
+    return "el script se detuvo"
+
+
 def main():
     global _ejecutando, _layout_inicializado
 
@@ -562,32 +707,51 @@ def main():
 
     registrar_evento(f"Inicio del script (PID {os.getpid()})")
 
-    keyboard.add_hotkey(HOTKEY_TURBO_ON, activar_turbo)
-    keyboard.add_hotkey(HOTKEY_TURBO_OFF, desactivar_turbo)
+    try:
+        registrar_hotkey(HOTKEY_TURBO_ON, activar_turbo)
+        registrar_hotkey(HOTKEY_TURBO_OFF, desactivar_turbo)
+    except Exception:
+        registrar_excepcion(sys.exc_info(), "registro de los hotkeys F11/F12")
+        marcar_salida("No se pudieron registrar los hotkeys F11/F12")
+        _ejecutando = False
+        print("[!] No se pudo instalar el hook de teclado. Revisa error.log")
+        return 1
 
     hilo = threading.Thread(target=ejecutar_macro, daemon=True)
     hilo.start()
+
+    vigilante = threading.Thread(target=watchdog_teclado, daemon=True)
+    vigilante.start()
 
     dibujar_layout()
     with _lock_estado:
         _layout_inicializado = True
 
-    try:
-        keyboard.wait(HOTKEY_SALIR)
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        print(f"[!] El hook de teclado fallo: {e}")
-        registrar_error(sys.exc_info(), "keyboard.wait()")
-    registrar_evento("Salida limpia por FIN o Ctrl+C")
+    motivo = esperar_salida()
+
+    if motivo not in ("FIN", "Ctrl+C"):
+        # El watchdog (u otro hilo) ya decidio que esto debia terminar.
+        motivo = motivo_salida() or motivo
+
     _ejecutando = False
     hilo.join(timeout=2.0)
     soltar_arriba()  # red de seguridad si el hilo no llego a limpiar
+
+    if motivo in ("FIN", "Ctrl+C"):
+        registrar_evento("Salida limpia por FIN o Ctrl+C")
+        return 0
+
+    # Salida anomala: hay que dejar rastro claro de por que.
+    mostrar_estado(ESTADO_SIN_TECLADO if "hook" in motivo else ESTADO_FALLO)
+    registrar_evento(f"Salida con error: {motivo}")
+    print(f"\n[!] {motivo}")
+    print("[!] Revisa error.log para mas detalle.")
     try:
         keyboard.unhook_all()
-    except Exception as e:
-        registrar_error(sys.exc_info(), "keyboard.unhook_all()")
+    except Exception:
+        registrar_excepcion(sys.exc_info(), "keyboard.unhook_all()")
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
