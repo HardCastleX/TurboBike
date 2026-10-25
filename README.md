@@ -1,64 +1,65 @@
 # TurboBike
 
-Macro externa para GTA San Andreas (1.0 US) que automatiza el glitch de velocidad de la NRG-500: pulsa `Flecha Arriba` mientras mantienes pulsada `W`.
+**English** | [Español](README.es.md)
 
-## Cómo funciona
+External macro for GTA San Andreas (1.0 US) that automates the NRG-500 speed glitch: it taps `Up Arrow` while you hold `W`.
 
-El pulso va **enganchado al frame del juego**, no a un intervalo en milisegundos. GTA SA muestrea el teclado una vez por frame y el glitch premia el *flanco* de pulsación, así que el máximo teórico es un flanco cada dos frames. Un intervalo fijo en ms no puede alcanzarlo: si es más corto que un frame el pulso cae entre muestreos y se pierde el boost entero, y si es más largo se desperdician frames.
+## How it works
 
-Para saber cuándo empieza un frame se lee `CTimer::m_snTimeInMilliseconds` (`0xB7CB84`), que avanza una vez por frame. Eso hace la cadencia **óptima por construcción e inmune a las variaciones de FPS**, y de paso el delta entre lecturas da los FPS reales, que se muestran en la consola. A 90 FPS son ~45 flancos por segundo, frente a los ~11 de la versión anterior basada en retardos aleatorios.
+The tap is **locked to the game's frame**, not to a millisecond interval. GTA SA samples the keyboard once per frame and the glitch rewards the *press edge*, so the theoretical maximum is one edge every two frames. A fixed ms interval cannot reach that: if it is shorter than a frame, the tap falls between samples and the whole boost is lost; if it is longer, frames are wasted.
 
-Las pulsaciones se envían con `SendInput` por scancode (la vía que leen los juegos DirectInput) y el estado de `W` se consulta con `GetAsyncKeyState`, todo directamente vía `ctypes`.
+To know when a frame starts, the script reads `CTimer::m_snTimeInMilliseconds` (`0xB7CB84`), which advances once per frame. That makes the cadence **optimal by construction and immune to FPS variations**, and the delta between reads also gives the real FPS, which is shown in the console. At 90 FPS that is ~45 edges per second, versus ~11 in the previous version based on random delays.
 
-> **Nota:** el script **lee memoria del proceso del juego** (solo lectura, nunca escribe). No modifica nada, pero `OpenProcess`/`ReadProcessMemory` sobre `gta_sa.exe` es detectable por los anticheat de SA-MP y MTA. Está pensado para un jugador.
+Keystrokes are sent with `SendInput` by scancode (the path DirectInput games read) and the `W` state is queried with `GetAsyncKeyState`, all directly through `ctypes`.
 
-## Requisitos
+> **Note:** the script **reads the game process memory** (read-only, it never writes). It does not modify anything, but `OpenProcess`/`ReadProcessMemory` on `gta_sa.exe` is detectable by SA-MP and MTA anti-cheat systems. It is intended for single-player.
+
+## Requirements
 
 - Windows + Python 3
 - GTA San Andreas 1.0 US (`gta_sa.exe`)
 
-## Instalación y uso
+## Installation and usage
 
-1. Abre GTA San Andreas.
-2. Ejecuta `ejecutar.bat` (instala las dependencias y lanza la macro).
+1. Open GTA San Andreas.
+2. Run `ejecutar.bat` (installs dependencies and starts the macro).
 
-O manualmente:
+Or manually:
 
 ```bat
 pip install -r requirements.txt
 python gta_sa_turbo.py
 ```
 
-### ¿Hace falta administrador?
+### Do I need administrator rights?
 
-Normalmente **no**: ni el hook global de teclado, ni `SendInput`, ni leer la memoria de un proceso del mismo usuario requieren elevación. Solo lo necesitas si lanzas GTA SA como administrador (habitual con mods o con las opciones de compatibilidad de Windows): en ese caso UIPI bloquea la inyección de pulsaciones desde un proceso con menos privilegios que la ventana de destino, y el juego no responderá aunque la macro parezca funcionar. La regla es que el script esté al mismo nivel de privilegios que el juego, o por encima.
+Normally **no**: neither the global keyboard hook, nor `SendInput`, nor reading the memory of a process owned by the same user requires elevation. You only need it if you launch GTA SA as administrator (common with mods or Windows compatibility options): in that case UIPI blocks keystroke injection from a process with lower privileges than the target window, and the game will not respond even though the macro seems to work. The rule is that the script must run at the same privilege level as the game, or higher.
 
-## Controles
+## Controls
 
-| Tecla | Acción |
-|-------|--------|
-| `F11` | Activar modo turbo |
-| `F12` | Desactivar modo turbo |
-| `W` (mantener) | Ejecuta la macro mientras aceleras en una moto |
-| `FIN (END)` | Cerrar el script |
+| Key | Action |
+|-----|--------|
+| `F11` | Enable turbo mode |
+| `F12` | Disable turbo mode |
+| `W` (hold) | Runs the macro while accelerating on a bike |
+| `END` | Close the script |
 
-## Diagnóstico de fallos
+## Failure diagnostics
 
-Si el script termina solo, el motivo queda siempre escrito en `error.log` y en
-la consola, y `ejecutar.bat` distingue entre salida limpia y error.
+If the script exits on its own, the reason is always written to `error.log` and
+to the console, and `ejecutar.bat` distinguishes a clean exit from an error.
 
-El script vigila los dos hilos que `keyboard` usa en segundo plano (el de
-escucha del hook de Windows y el que invoca los callbacks de los hotkeys).
-Si cualquiera de los dos muere, todos los hotkeys dejan de funcionar —incluido
-`FIN`—, así que el script no se quedaría esperando: lo detecta en un par de
-segundos y termina con un mensaje explicando qué pasó.
+The script watches the two threads `keyboard` uses in the background (the Windows
+hook listener and the one that invokes the hotkey callbacks). If either one dies,
+all hotkeys stop working —including `END`— so the script would otherwise wait
+forever: it detects this within a couple of seconds and exits with a message
+explaining what happened.
 
-La tecla `FIN` se detecta comprobando que no venga del teclado numérico. GTA SA
-usa el numpad para la cámara y el **numpad 1** comparte scan code con `FIN`:
-sin esa comprobación, pulsar el numpad 1 cerraba el script en mitad de la
-partida.
+`END` is detected by checking that it does not come from the numeric keypad. GTA SA
+uses the numpad for the camera and **numpad 1** shares a scan code with `END`:
+without that check, pressing numpad 1 would close the script mid-game.
 
-## Archivos
+## Files
 
-- `gta_sa_turbo.py` — script principal
-- `requirements.txt` / `ejecutar.bat` — instalación de dependencias
+- `gta_sa_turbo.py` — main script
+- `requirements.txt` / `ejecutar.bat` — dependency installation
