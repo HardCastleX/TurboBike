@@ -522,6 +522,36 @@ def registrar_hotkey(nombre, callback):
     return keyboard.add_hotkey(nombre, protegido)
 
 
+def registrar_tecla_salida(al_pulsar):
+    """Registra la tecla FIN distinguiendola del numpad 1.
+
+    `keyboard` identifica las teclas solo por scan code, y la FIN comparte el
+    79 con el NUMERO 1 del numpad (que GTA SA usa para la camara). Un
+    `add_hotkey("end", ...)` se dispara al pulsar el numpad 1 y cierra el
+    script en mitad de la partida.
+
+    Por eso usamos `on_press_key`, cuyo callback recibe el evento completo:
+    `is_keypad` (que la libreria calcula con el flag extendido) es False
+    para la FIN real y True para el numpad.
+
+    Ademas, `on_press_key` responde aunque haya otras teclas pulsadas,
+    mientras que `add_hotkey` exigia que FIN fuera la unica: si mantenias W
+    y pulsabas FIN, el cierre tampoco funcionaba.
+
+    Se devuelve la funcion para quitar la suscripcion.
+    """
+
+    def al_pulsar_tecla(evento):
+        try:
+            if evento.is_keypad:
+                return
+            al_pulsar()
+        except Exception:
+            registrar_excepcion(sys.exc_info(), "callback de la tecla de salida")
+
+    return keyboard.on_press_key(HOTKEY_SALIR, al_pulsar_tecla)
+
+
 class ContadorFps:
     """Promedia los deltas del timer del juego para mostrar FPS reales."""
 
@@ -677,7 +707,7 @@ def esperar_salida():
 
     quitar = None
     try:
-        quitar = registrar_hotkey(HOTKEY_SALIR, _al_pulsar_fin)
+        quitar = registrar_tecla_salida(_al_pulsar_fin)
     except Exception:
         registrar_excepcion(sys.exc_info(), "registro del hotkey de salida")
 
@@ -738,7 +768,7 @@ def main():
     soltar_arriba()  # red de seguridad si el hilo no llego a limpiar
 
     if motivo in ("FIN", "Ctrl+C"):
-        registrar_evento("Salida limpia por FIN o Ctrl+C")
+        registrar_evento(f"Salida limpia ({motivo})")
         return 0
 
     # Salida anomala: hay que dejar rastro claro de por que.

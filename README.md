@@ -53,6 +53,11 @@ Si cualquiera de los dos muere, todos los hotkeys dejan de funcionar —incluido
 `FIN`—, así que el script no se quedaría esperando: lo detecta en un par de
 segundos y termina con un mensaje explicando qué pasó.
 
+La tecla `FIN` se detecta comprobando que no venga del teclado numérico. GTA SA
+usa el numpad para la cámara y el **numpad 1** comparte scan code con `FIN`:
+sin esa comprobación, pulsar el numpad 1 cerraba el script en mitad de la
+partida.
+
 ## Archivos
 
 - `gta_sa_turbo.py` — script principal
